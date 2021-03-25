@@ -1,4 +1,4 @@
-# SCARD
+# Santorini Card
 
 
 ## How to start
