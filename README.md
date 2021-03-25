@@ -2,6 +2,17 @@
 
 **TODO: Add description**
 
+## How to start
+* run executable using 
+  ```
+  escript santorini_card
+  ```
+  (works on CADE MACHINE) 
+* if press "\n" after running, it will use default card set
+  ```
+  [{"card":"Artemis"},{"card":"Prometheus"}] 
+  ```
+
 ## Installation
 
 If [available in Hex](https://hex.pm/docs/publish), the package can be installed
