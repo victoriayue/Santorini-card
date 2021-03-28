@@ -80,11 +80,20 @@ defmodule SCARD.CLI do
   else, keep find recursive
   TODO if move block already have building or players
   """
-  def valid_move(cpRow, cpCol, spaces, players, currentLevel) do
+  def valid_move(cpRow, cpCol, spaces, players, player2, currentLevel) do
     # calculate valid moves
     valid = [[cpRow, cpCol+1], [cpRow, cpCol-1], [cpRow+1, cpCol], [cpRow-1, cpCol], [cpRow+1, cpCol+1], [cpRow-1, cpCol-1], [cpRow+1, cpCol-1], [cpRow-1, cpCol+1]]
     # pick rand move
-    valid_move_recur(valid, spaces, players, currentLevel)
+
+    result = valid_move_recur(valid, spaces, players, currentLevel)
+    if result == [-1, -1] do
+      [cpRow, cpCol]  = player2
+      valid = [[cpRow, cpCol+1], [cpRow, cpCol-1], [cpRow+1, cpCol], [cpRow-1, cpCol], [cpRow+1, cpCol+1], [cpRow-1, cpCol-1], [cpRow+1, cpCol-1], [cpRow-1, cpCol+1]]
+      {false, valid_move_recur(valid, spaces, players, currentLevel)}
+    else
+      {true, result}
+    end
+
   end
 
   def valid_move_recur(valid, spaces, players, currentLevel) do
@@ -99,6 +108,7 @@ defmodule SCARD.CLI do
         valid_move_recur(valid, spaces, players, currentLevel)
       else
         build = Enum.at(Enum.at(spaces, r-1), c-1)
+        #IO.puts "current level is #{currentLevel}, picked level is #{build}, picked loc is (#{r}, #{c})"
         if abs(build - currentLevel)>1 or ([r,c] in players) do
           valid = valid -- [randMove]
           valid_move_recur(valid, spaces, players, currentLevel)
@@ -114,14 +124,19 @@ defmodule SCARD.CLI do
   if it's out of bound
   or if the current cell already contain other build
   """
-  def check_valid_neighbor(item, players) do
+  def check_valid_neighbor(item, players, spaces) do
     cpRow = Enum.at(item, 0)
     cpCol = Enum.at(item, 1)
 
-    if cpRow <1 or cpRow >5 or cpCol <1 or cpCol >5 or ([cpRow, cpCol] in players)do
+
+    if cpRow <1 or cpRow >5 or cpCol <1 or cpCol >5 do
       false
     else
-      true
+      if [cpRow, cpCol] in players do
+        false
+      else
+        true
+      end
     end
 
   end
@@ -163,7 +178,7 @@ defmodule SCARD.CLI do
     # get all valid neighbors
     valid_neighbor = []
     valid_neighbor = Enum.map(valid, fn item ->
-      if check_valid_neighbor(item, players) == true do
+      if check_valid_neighbor(item, players, spaces) == true do
         valid_neighbor ++ item
       else
         valid_neighbor ++ [-1, -1]# TODO
@@ -188,7 +203,7 @@ defmodule SCARD.CLI do
     {_, token1} = Map.fetch(Enum.at(players, 0), :tokens)
     {_, token2} = Map.fetch(Enum.at(players, 1), :tokens)
     [cpRow, cpCol] = Enum.at(token1, 0)
-    original = [cpRow, cpCol]
+
 
     # get current spaces
     {_, spaces} = Map.fetch(map, :spaces)
@@ -197,23 +212,30 @@ defmodule SCARD.CLI do
 
     # get valid random move
     tokens = token1 ++ token2
-    [r, c] = valid_move(cpRow, cpCol, spaces, tokens, currentLevel)
-
-    # if no valid move for current player
-    # if [r,c] == [-1, -1] do
-    #   # pick second player
-    #   [cpRow, cpCol] = Enum.at(Enum.at(players, 0), 1)
-    #   {_, spaces} = Map.fetch(map, :spaces)
-    #   currentLevel = Enum.at(Enum.at(spaces, cpRow-1), cpCol-1)
-    #   [r, c] = valid_move(cpRow, cpCol, spaces, tokens, currentLevel)
-    # end
+    {player1, [r, c]} = valid_move(cpRow, cpCol, spaces, tokens, Enum.at(token1, 1), currentLevel)
 
     randMove = [r, c]
     # currentMove = randMove
 
     # update players in map, opponent at front
-    op = Enum.at(players, 1) # {"card":"Prometheus","tokens":[[2,3], [4.4]]}
-    new_tokens = [randMove, Enum.at(token1, 1)]
+    op = Enum.at(players, 1)
+
+    new_tokens = if player1 == true do
+      [randMove, Enum.at(token1, 1)]
+    else
+      [randMove, Enum.at(token1, 0)]
+    end
+
+    original = if player1 == true do
+      [cpRow, cpCol]
+    else
+      Enum.at(token1, 1)
+    end
+
+    if randMove == [-1, -1] do
+      IO.puts "invalid move"
+      System.halt(0)
+    end
 
     {_, card1} = Map.fetch(Enum.at(players, 0), :card)
 
@@ -239,13 +261,11 @@ defmodule SCARD.CLI do
     # build
     # default pick first chess
     randMove = Enum.at(token1, 0)
-    # IO.puts "randmove"
-    # IO.inspect randMove
+    # [cr, cc] = randMove
 
+    # if stand on level 3
 
     {[r,c], randLevel} = valid_build(randMove, spaces, tokens, card)
-    # IO.puts "pick valid build"
-    # IO.inspect [r, c]
 
     # update spaces
     updateRow = Enum.at(spaces, r-1) |> List.replace_at(c-1, randLevel)
@@ -253,8 +273,9 @@ defmodule SCARD.CLI do
     {_, map} = Map.get_and_update(map, :spaces, fn current ->
       {current, updateSpace}
     end)
+
     # IO.inspect updateSpace
-    {randMove, map}
+    {[r,c], map}
   end
   @doc """
   A token’s move can optionally swap places with an adjacent opponent token, as long as
@@ -269,18 +290,21 @@ defmodule SCARD.CLI do
     {_, _, map} = pick_update_player(map)
 
     # second, update build
-    {_, map} = update_build(map, :apollo)
+    if check_win(map) == false do
+      {_, map} = update_build(map, :apollo)
 
-    # last, update turn
-    {_, map} = Map.get_and_update(map, :turn, fn current ->
-      {current, current + 1}
-    end)
+      # last, update turn
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
 
-    map
-
+      map
+    else
+      map
+    end
   end
 
-  def second_update(map, check) do
+  def second_update(map, check, which_player) do
     # pick player - default the first one
     {_, players} = Map.fetch(map, :players)
     {_, token1} = Map.fetch(Enum.at(players, 0), :tokens) # opponent
@@ -295,27 +319,47 @@ defmodule SCARD.CLI do
 
     # get valid random move
     tokens = token1 ++ token2
-    tokens = tokens ++ check # check is the original position for the first move
-    [r, c] = valid_move(cpRow, cpCol, spaces, tokens, currentLevel)
+    tokens = tokens ++ [check] # check is the original position for the first move
+    # IO.puts "tokens"
+    # IO.inspect tokens
+    {player1, [r, c]} = valid_move(cpRow, cpCol, spaces, tokens, Enum.at(token2, 1), currentLevel)
 
-    randMove = [r, c]
-    current = randMove
+    # if updated token is not qualified, return false and don't do second move
+    if (player1 == true and which_player == 1) or (player1 == false and which_player == 0) do
+      {original, false, map}
+    else
+      randMove = [r, c]
+      if check == randMove do
+          second_update(map, check, which_player)
+      else
+        # update players in map, opponent at 0, current at 1
+        op = Enum.at(players, 0)
+        new_tokens = if player1 == true do
+           [randMove, Enum.at(token2, 1)]
+        else
+           [randMove, Enum.at(token2, 0)]
+        end
 
-    # update players in map, opponent at 0, current at 1
-    op = Enum.at(players, 0)
-    new_tokens = [randMove, Enum.at(token2, 1)]
+        if randMove == [-1, -1] do
+          IO.puts "invalid move"
+          System.halt(0)
+        end
+        {_, card1} = Map.fetch(Enum.at(players, 1), :card) # my card
+        update = [op, %{:card => card1, :tokens => new_tokens}]
 
-    {_, card1} = Map.fetch(Enum.at(players, 1), :card) # my card
+        # update map
+        {_, map} = Map.get_and_update(map, :players, fn current ->
+          {current, update}
+        end)
 
-    update = [op, %{:card => card1, :tokens => new_tokens}]
+        {original, true, map}
+      end
+    end
 
-    # update map
-    {_, map} = Map.get_and_update(map, :players, fn current ->
-      {current, update}
-    end)
 
-    {original, current, map}
   end
+
+
   @doc """
   The moved token can optionally move a second time (i.e., the same token), as long as
   the first move doesn’t win, and as long as the second move doesn’t return to the original space.
@@ -323,36 +367,40 @@ defmodule SCARD.CLI do
   def artemis(map) do
     # IO.puts "artemis"
     # first, update player
-    {original, _, map} = pick_update_player(map)
-    # IO.puts "original pos"
-    # IO.inspect original
-    # IO.puts "update pos"
-    # IO.inspect updateP
-    # IO.inspect map
-    # second, update build
-    # if not win, move twice
+    {original, current1, map} = pick_update_player(map)
+    players = Map.fetch!(map, :players)
+    token2 = Map.fetch!(Enum.at(players, 1), :tokens) # my turn
 
-    # IO.puts "build pos"
-    # IO.inspect build
+    which_player = if Enum.at(token2, 0) == current1 do  0 else 1 end
+
+    # if already moved one token, the second time will move same token TODO
     if check_win(map) == false do
+
       # check whether it's return to original space
-      {_, current, map} = second_update(map, original)
-      # IO.puts "second pos"
-      # IO.inspect current
-      # last, update turn
+      {_, qualified, second_map} = second_update(map, original, which_player)
+
+      # if second move and first move are not same token, unqualified move
+      map = if qualified == true do second_map else map end
 
       # if second move return to the original space, recursive
-      if current == original do
-        artemis(map)
-      else
-        # do build
+      # do build
+      if check_win(map) == false do
         {_, map} = update_build(map, :artemis)
+
+        {_, map} = Map.get_and_update(map, :turn, fn current ->
+          {current, current + 1}
+        end)
+        map
+      else
         {_, map} = Map.get_and_update(map, :turn, fn current ->
           {current, current + 1}
         end)
         map
       end
     else
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
       map
     end
   end
@@ -369,14 +417,20 @@ defmodule SCARD.CLI do
 
     # second, update build
     # make one build to level 4
-    {_, map} = update_build(map, :atlas)
+    if check_win(map) == false do
+      {_, map} = update_build(map, :atlas)
 
-    # last, update turn
-    {_, map} = Map.get_and_update(map, :turn, fn current ->
-      {current, current + 1}
-    end)
-
-    map
+      # last, update turn
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
+      map
+    else
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
+      map
+    end
   end
 
 
@@ -386,15 +440,21 @@ defmodule SCARD.CLI do
     [r, c] = currentBuild
     currLevel = Enum.at(Enum.at(spaces, r-1), c-1)
 
-    if samePlace do
+    if samePlace==true do
       # add 1 to current build, update spaces
-      updateRow = Enum.at(spaces, r-1) |> List.replace_at(c-1, currLevel+1)
-      spaces = List.replace_at(spaces, r-1, updateRow)
-      {_, map} = Map.get_and_update(map, :spaces, fn current ->
-        {current, spaces}
-      end)
+      # IO.inspect [r, c]
+      if currLevel == 3 do
+        # can't build level 4
+        map
+      else
+        updateRow = Enum.at(spaces, r-1) |> List.replace_at(c-1, currLevel+1)
+        updateSpace = List.replace_at(spaces, r-1, updateRow)
+        {_, map} = Map.get_and_update(map, :spaces, fn current ->
+          {current, updateSpace}
+        end)
+        map
+      end
 
-      map
     else
       {_, players} = Map.fetch(map, :players)
       {_, token1} = Map.fetch(Enum.at(players, 0), :tokens)
@@ -427,13 +487,20 @@ defmodule SCARD.CLI do
     # second, update build
     # update twice by default
     # check first and second build not in same space
-    {build1, map} = update_build(map, :demeter)
-    map = second_build(map, build1, false)
-    # last, update turn
-    {_, map} = Map.get_and_update(map, :turn, fn current ->
-      {current, current + 1}
-    end)
-    map
+    if check_win(map) == false do
+      {build1, map} = update_build(map, :demeter)
+      map = second_build(map, build1, false)
+      # last, update turn
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
+      map
+    else
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
+      map
+    end
   end
 
   @doc """
@@ -446,17 +513,24 @@ defmodule SCARD.CLI do
     # first, update player
     {_, _, map} = pick_update_player(map)
 
-    # second, update build
-    # update twice by default
-    {build1, map} = update_build(map, :hephastus)
-    map = second_build(map, build1, true)
+    if check_win(map) == false do
+      # second, update build
+      # update twice by default, same place
+      {build1, map} = update_build(map, :hephastus)
+      # IO.inspect build1
+      map = second_build(map, build1, true)
 
-    # last, update turn
-    {_, map} = Map.get_and_update(map, :turn, fn current ->
-      {current, current + 1}
-    end)
-
-    map
+      # last, update turn
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
+      map
+    else
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
+      map
+    end
   end
 
   @doc """
@@ -473,17 +547,80 @@ defmodule SCARD.CLI do
     # first, update player
     {_, _, map} = pick_update_player(map)
 
-    # second, update build
-    map = update_build(map, false)
+    if check_win(map) == false do
+      # second, update build
+      {_, map} = update_build(map, false)
 
-    # last, update turn
-    {_, map} = Map.get_and_update(map, :turn, fn current ->
-      {current, current + 1}
-    end)
-
-    map
+      # last, update turn
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
+      map
+    else
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
+      map
+    end
   end
 
+  def find_pan_neighbor(valid, spaces, players, currentLevel) do
+    if length(valid) == 0 do
+      [-1, -1]
+    else
+      pick = Enum.random(valid)
+      [r,c] = pick
+      if (r <1 or r >5 or c <1 or c >5) or (pick in players) do
+        valid = valid -- [pick]
+        find_pan_neighbor(valid, spaces, players, currentLevel)
+      else
+        pick_level = Enum.at(Enum.at(spaces, r-1), c-1)
+        if currentLevel - pick_level >=2 do
+          pick
+        else
+          valid = valid -- [pick]
+          find_pan_neighbor(valid, spaces, players, currentLevel)
+        end
+      end
+
+    end
+
+  end
+
+  def check_pan_win(map) do
+    # pick player - default the first one
+    {_, players} = Map.fetch(map, :players)
+    {_, token1} = Map.fetch(Enum.at(players, 0), :tokens)
+    {_, token2} = Map.fetch(Enum.at(players, 1), :tokens)
+    [cpRow, cpCol] = Enum.at(token1, 0)
+    tokens = token1 ++ token2
+
+    # get current spaces
+    {_, spaces} = Map.fetch(map, :spaces)
+    currentLevel = Enum.at(Enum.at(spaces, cpRow-1), cpCol-1)
+
+    if currentLevel >=2 do
+      # find a valid neighbor
+      valid = [[cpRow, cpCol+1], [cpRow, cpCol-1], [cpRow+1, cpCol], [cpRow-1, cpCol], [cpRow+1, cpCol+1], [cpRow-1, cpCol-1], [cpRow+1, cpCol-1], [cpRow-1, cpCol+1]]
+      pick = find_pan_neighbor(valid, spaces, tokens, currentLevel)
+
+      if pick != [-1, -1] do
+        # move to pick and win
+        {_, card1} = Map.fetch(Enum.at(players, 0), :card)
+        update = [Enum.at(players, 1), %{:card => card1, :tokens => [pick, Enum.at(token1, 1)] } ]
+
+        {_, map} = Map.get_and_update(map, :players, fn current ->
+          {current, update}
+        end)
+        {true, map}
+      else
+        {false, map}
+      end
+    else
+      {false, map}
+    end
+
+  end
   @doc """
   A token can win either by moving up to level 3 or by moving down two or more levels.
   (Moving down three levels is possible if a token was pushed by a Minotaur.)
@@ -492,17 +629,39 @@ defmodule SCARD.CLI do
     # IO.puts "hephastus"
 
     # first, update player
-    {_, _, map} = pick_update_player(map)
+    # if current token in level >=2
+    # move down and win
+    {result, check_map} = check_pan_win(map)
 
-    # second, update build
-    map = update_build(map, false)
+    if result == true do
 
-    # last, update turn
-    {_, map} = Map.get_and_update(map, :turn, fn current ->
-      {current, current + 1}
-    end)
+      {_, map} = Map.get_and_update(check_map, :turn, fn current ->
+        {current, current + 1}
+      end)
+      map
 
-    map
+    else
+
+      {original, current, map} = pick_update_player(map)
+      if check_win(map) == false do
+        # second, update build
+        {_, map} = update_build(map, false)
+        # last, update turn
+        {_, map} = Map.get_and_update(map, :turn, fn current ->
+          {current, current + 1}
+        end)
+        map
+
+      else
+        {_, map} = Map.get_and_update(map, :turn, fn current ->
+          {current, current + 1}
+        end)
+        map
+
+      end
+
+    end
+
   end
 
   @doc """
@@ -519,14 +678,22 @@ defmodule SCARD.CLI do
     # second, update build
     # update twice by default
     # TODO check first and second build are in same space
-    {_, map} = update_build(map, false)
+    if check_win(map) == false do
+      {_, map} = update_build(map, false)
 
-    # last, update turn
-    {_, map} = Map.get_and_update(map, :turn, fn current ->
-      {current, current + 1}
-    end)
+      # last, update turn
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
+      map
+    else
+      # last, update turn
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
+      map
+    end
 
-    map
   end
 
   def calculate(map) do
@@ -560,21 +727,21 @@ defmodule SCARD.CLI do
 
     [p2row, p2col] = Enum.at(token1, 1)
     level2 = Enum.at(Enum.at(spaces, p2row-1), p2col-1)
-    if level1 == 3 or level2 == 3 do
-      # IO.puts "I'm win\n"
-      true
-    end
 
     [p3row, p3col] = Enum.at(token2, 0)
     level3 = Enum.at(Enum.at(spaces, p3row-1), p3col-1)
 
     [p4row, p4col] = Enum.at(token2, 1)
     level4 = Enum.at(Enum.at(spaces, p4row-1), p4col-1)
-    if level3 == 3 or level4 == 3 do
-      # IO.puts "You're win\n"
+
+
+    if level1 == 3 or level2 == 3 or level3 == 3 or level4 == 3 do
+
       true
+      # System.halt(0)
+    else
+      false
     end
-    false
 
   end
 
@@ -586,7 +753,7 @@ defmodule SCARD.CLI do
       # when start the game, pick two cards
       oppo == "\n" ->
         oppo = ~S"""
-         [{"card":"Atlas"},{"card":"Artemis"}]
+         [{"card":"Atlas"},{"card":"Minotaur"}]
          """
         # json = encode_Map(oppo)
         IO.puts oppo
