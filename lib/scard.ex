@@ -300,6 +300,10 @@ defmodule SCARD.CLI do
 
       map
     else
+      # last, update turn
+      {_, map} = Map.get_and_update(map, :turn, fn current ->
+        {current, current + 1}
+      end)
       map
     end
   end
@@ -456,16 +460,20 @@ defmodule SCARD.CLI do
       end
 
     else
+
       {_, players} = Map.fetch(map, :players)
-      {_, token1} = Map.fetch(Enum.at(players, 0), :tokens)
-      {_, token2} = Map.fetch(Enum.at(players, 1), :tokens)
+      {_, token1} = Map.fetch(Enum.at(players, 1), :tokens)
+      {_, token2} = Map.fetch(Enum.at(players, 0), :tokens)
       tokens = token1 ++ token2
-      tokens  = tokens ++ currentBuild # next build block can't duplicate with current build
+      tokens  = tokens ++ [currentBuild] # next build block can't duplicate with current build
+      # IO.inspect tokens 
       randMove = Enum.at(token1, 0)
 
       {[r,c], randLevel} = valid_build(randMove, spaces, tokens, :demeter)
       updateRow = Enum.at(spaces, r-1) |> List.replace_at(c-1, randLevel)
+
       spaces = List.replace_at(spaces, r-1, updateRow)
+
       {_, map} = Map.get_and_update(map, :spaces, fn current ->
         {current, spaces}
       end)
